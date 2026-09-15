@@ -293,6 +293,15 @@ describe("QwenCloud Token Plan opt-in usage", () => {
 		);
 		expect(funded?.map(limit => limit.id)).toEqual(["credits:addon"]);
 
+		// …and a live report in that state must be able to lift a stale block, or
+		// a transient add-on fetch failure would sideline the account until the
+		// plan reset.
+		const healable = alibabaTokenPlanRankingStrategy.healableBlockScopes?.(
+			exhaustedPlan({ remainingCredits: 19_999.62, totalCredits: 20_000 }),
+		);
+		expect(healable?.map(entry => entry.blockScope)).toEqual([""]);
+		expect(healable?.[0]?.limits.map(limit => limit.id)).toEqual(["credits:addon"]);
+
 		// Plan spent, add-on spent: the plan window gates again, and the add-on
 		// never contributes its own (expiry-based) deadline.
 		const spent = alibabaTokenPlanRankingStrategy.scopeLimits?.(

@@ -334,24 +334,36 @@ export const alibabaTokenPlanUsageProvider: UsageProvider = {
 		Boolean(params.credential.apiKey && parseAlibabaTokenPlanCredential(params.credential.apiKey)?.cookie),
 };
 
+/**
+ * Limits that gate a hard block for this provider.
+ *
+ * Add-on credits are a shared overflow pool: while any remain, an exhausted
+ * plan window does not make the credential unusable, so the plan windows must
+ * not gate a hard block. The add-on limit itself never gates one — it expires
+ * rather than resets, so its deadline would sideline a recovered account for
+ * weeks — hence it is dropped once it is spent and the plan windows take over
+ * again.
+ */
+function tokenPlanGatingLimits(report: UsageReport): UsageLimit[] {
+	const addon = report.limits.find(limit => limit.id === ADDON_LIMIT_ID);
+	if (addon && !limitExhausted(addon)) return [addon];
+	return report.limits.filter(limit => limit.id !== ADDON_LIMIT_ID);
+}
+
 export const alibabaTokenPlanRankingStrategy: CredentialRankingStrategy = {
 	findWindowLimits: report => ({
 		primary: report.limits.find(limit => limit.id === "credits:5h"),
 		secondary: report.limits.find(limit => limit.id === "credits:7d"),
 	}),
+	scopeLimits: tokenPlanGatingLimits,
 	/**
-	 * Add-on credits are a shared overflow pool: while any remain, an exhausted
-	 * plan window does not make the credential unusable, so the plan windows
-	 * must not gate a hard block. The add-on limit itself never gates one — it
-	 * expires rather than resets, so its deadline would sideline a recovered
-	 * account for weeks — hence it is dropped once it is spent and the plan
-	 * windows take over again.
+	 * A live report can lift a stale block. The add-on list is a second console
+	 * call, so a transient failure there can block a funded account; without
+	 * healing, an API-key block is never re-probed and would stand until the
+	 * plan reset. Judging the block against the same gating limits selection
+	 * uses lets the next healthy report clear it.
 	 */
-	scopeLimits: report => {
-		const addon = report.limits.find(limit => limit.id === ADDON_LIMIT_ID);
-		if (addon && !limitExhausted(addon)) return [addon];
-		return report.limits.filter(limit => limit.id !== ADDON_LIMIT_ID);
-	},
+	healableBlockScopes: report => [{ blockScope: "", limits: tokenPlanGatingLimits(report) }],
 	windowDefaults: {
 		primaryMs: 5 * HOUR_MS,
 		secondaryMs: WEEK_MS,
